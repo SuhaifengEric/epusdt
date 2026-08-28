@@ -50,6 +50,7 @@ var Errno = map[int]string{
 	10044: "invalid order redirect url",
 	10045: "order api key unavailable",
 	10046: "failed to build epay return signature",
+	10047: "order immutable fields conflict",
 }
 
 var (
@@ -100,6 +101,7 @@ var (
 	OrderRedirectURLErr        = Err(10044)
 	OrderApiKeyUnavailableErr  = Err(10045)
 	EPayReturnSignatureErr     = Err(10046)
+	OrderImmutableConflict     = Err(10047)
 )
 
 type RspError struct {
@@ -143,6 +145,9 @@ func (re *RspError) HttpStatus() int {
 	}
 	if re.Code >= 400 && re.Code < 600 {
 		return re.Code
+	}
+	if re.Code == 10047 {
+		return 409
 	}
 	return 400
 }

@@ -225,9 +225,11 @@ func sendOrderCallback(order *mdb.Orders) error {
 			TradeId:            order.TradeId,
 			OrderId:            order.OrderId,
 			Amount:             order.Amount,
+			Currency:           order.Currency,
 			ActualAmount:       order.ActualAmount,
 			ReceiveAddress:     order.ReceiveAddress,
 			Token:              order.Token,
+			Network:            order.Network,
 			BlockTransactionId: order.BlockTransactionId,
 			Status:             mdb.StatusPaySuccess,
 		}

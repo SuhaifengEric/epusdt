@@ -28,6 +28,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -67,6 +68,26 @@ func setupTestEnv(t *testing.T) *echo.Echo {
 	if err := dao.RuntimeInit(); err != nil {
 		t.Fatalf("RuntimeInit: %v", err)
 	}
+	t.Cleanup(func() {
+		for name, db := range map[string]*gorm.DB{
+			"runtime": dao.RuntimeDB,
+			"primary": dao.Mdb,
+		} {
+			if db == nil {
+				continue
+			}
+			sqlDB, err := db.DB()
+			if err != nil {
+				t.Errorf("get %s test database handle: %v", name, err)
+				continue
+			}
+			if err = sqlDB.Close(); err != nil {
+				t.Errorf("close %s test database: %v", name, err)
+			}
+		}
+		dao.RuntimeDB = nil
+		dao.Mdb = nil
+	})
 
 	// ensure tables exist (MdbTableInit uses sync.Once, so migrate directly)
 	dao.Mdb.AutoMigrate(
@@ -344,6 +365,163 @@ func TestCreateOrderGmpayRejectsPrivateNotifyURL(t *testing.T) {
 	}
 	if got, _ := resp["message"].(string); got != constant.Errno[10041] {
 		t.Fatalf("message = %q, want %q", got, constant.Errno[10041])
+	}
+}
+
+func TestCreateOrderGmpayStrictIdempotencyAndConflict(t *testing.T) {
+	e := setupTestEnv(t)
+
+	body := signBody(map[string]interface{}{
+		"order_id":     "test-idempotent-route-001",
+		"amount":       1.00,
+		"token":        "usdt",
+		"currency":     "cny",
+		"network":      "solana",
+		"notify_url":   "https://93.184.216.34/notify",
+		"redirect_url": "https://93.184.216.34/return",
+		"name":         "idempotent fixture",
+	})
+	firstRec := doPost(e, "/payments/gmpay/v1/order/create-transaction", body)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("first create failed: %d %s", firstRec.Code, firstRec.Body.String())
+	}
+	secondRec := doPost(e, "/payments/gmpay/v1/order/create-transaction", body)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("identical repeat failed: %d %s", secondRec.Code, secondRec.Body.String())
+	}
+	firstData := parseResp(t, firstRec)["data"].(map[string]interface{})
+	secondData := parseResp(t, secondRec)["data"].(map[string]interface{})
+	if secondData["trade_id"] != firstData["trade_id"] {
+		t.Fatalf("repeat trade_id = %v, want %v", secondData["trade_id"], firstData["trade_id"])
+	}
+	if secondData["network"] != "solana" {
+		t.Fatalf("repeat network = %v, want solana", secondData["network"])
+	}
+
+	conflict := map[string]interface{}{
+		"order_id":     "test-idempotent-route-001",
+		"amount":       1.01,
+		"token":        "usdt",
+		"currency":     "cny",
+		"network":      "solana",
+		"notify_url":   "https://93.184.216.34/notify",
+		"redirect_url": "https://93.184.216.34/return",
+		"name":         "idempotent fixture",
+	}
+	conflictRec := doPost(e, "/payments/gmpay/v1/order/create-transaction", signBody(conflict))
+	if conflictRec.Code != http.StatusConflict {
+		t.Fatalf("conflicting repeat status = %d, want 409: %s", conflictRec.Code, conflictRec.Body.String())
+	}
+	conflictResp := parseResp(t, conflictRec)
+	if got := int(conflictResp["status_code"].(float64)); got != 10047 {
+		t.Fatalf("conflicting repeat status_code = %d, want 10047", got)
+	}
+}
+
+func TestMerchantOrderQueryIsCompleteSignedAndScoped(t *testing.T) {
+	e := setupTestEnv(t)
+
+	createRec := doPost(e, "/payments/gmpay/v1/order/create-transaction", signBody(map[string]interface{}{
+		"order_id":   "test-merchant-query-001",
+		"amount":     1.00,
+		"token":      "usdt",
+		"currency":   "cny",
+		"network":    "solana",
+		"notify_url": "https://93.184.216.34/notify",
+	}))
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create failed: %d %s", createRec.Code, createRec.Body.String())
+	}
+	tradeID, _ := parseResp(t, createRec)["data"].(map[string]interface{})["trade_id"].(string)
+
+	queryRec := doPost(e, "/payments/gmpay/v1/order/query", signBody(map[string]interface{}{
+		"order_id": "test-merchant-query-001",
+	}))
+	if queryRec.Code != http.StatusOK {
+		t.Fatalf("query failed: %d %s", queryRec.Code, queryRec.Body.String())
+	}
+	queryData := parseResp(t, queryRec)["data"].(map[string]interface{})
+	for _, field := range []string{"pid", "trade_id", "order_id", "amount", "currency", "actual_amount", "receive_address", "token", "network", "block_transaction_id", "status", "expiration_time", "signature"} {
+		if _, ok := queryData[field]; !ok {
+			t.Fatalf("query response missing %s: %#v", field, queryData)
+		}
+	}
+	if queryData["pid"] != testAPIToken || queryData["trade_id"] != tradeID || queryData["network"] != "solana" || queryData["currency"] != "CNY" {
+		t.Fatalf("query identifiers/assets mismatch: %#v", queryData)
+	}
+	receivedSignature, _ := queryData["signature"].(string)
+	delete(queryData, "signature")
+	expectedSignature, err := sign.GetHMACSHA256(queryData, testAPIToken)
+	if err != nil {
+		t.Fatalf("calculate query response signature: %v", err)
+	}
+	if receivedSignature != expectedSignature {
+		t.Fatalf("query response signature = %q, want %q", receivedSignature, expectedSignature)
+	}
+
+	for name, identifiers := range map[string]map[string]interface{}{
+		"trade id only": {"trade_id": tradeID},
+		"both matching": {"order_id": "test-merchant-query-001", "trade_id": tradeID},
+	} {
+		rec := doPost(e, "/payments/gmpay/v1/order/query", signBody(identifiers))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s query failed: %d %s", name, rec.Code, rec.Body.String())
+		}
+		data := parseResp(t, rec)["data"].(map[string]interface{})
+		if data["trade_id"] != tradeID || data["order_id"] != "test-merchant-query-001" {
+			t.Fatalf("%s query returned wrong order: %#v", name, data)
+		}
+	}
+
+	mismatchRec := doPost(e, "/payments/gmpay/v1/order/query", signBody(map[string]interface{}{
+		"order_id": "test-merchant-query-001",
+		"trade_id": "different-trade-id",
+	}))
+	if mismatchRec.Code != http.StatusBadRequest {
+		t.Fatalf("identifier mismatch status = %d, want 400", mismatchRec.Code)
+	}
+	if got := int(parseResp(t, mismatchRec)["status_code"].(float64)); got != 10008 {
+		t.Fatalf("identifier mismatch status_code = %d, want 10008", got)
+	}
+
+	otherKey := &mdb.ApiKey{Name: "other-merchant", Pid: "other-pid", SecretKey: "other-secret", Status: mdb.ApiKeyStatusEnable}
+	if err = dao.Mdb.Create(otherKey).Error; err != nil {
+		t.Fatalf("create other api key: %v", err)
+	}
+	crossMerchant := map[string]interface{}{"pid": otherKey.Pid, "order_id": "test-merchant-query-001"}
+	crossSignature, err := sign.GetHMACSHA256(crossMerchant, otherKey.SecretKey)
+	if err != nil {
+		t.Fatalf("sign cross-merchant query: %v", err)
+	}
+	crossMerchant["signature"] = crossSignature
+	crossRec := doPost(e, "/payments/gmpay/v1/order/query", crossMerchant)
+	if crossRec.Code != http.StatusBadRequest {
+		t.Fatalf("cross-merchant query status = %d, want 400", crossRec.Code)
+	}
+	if got := int(parseResp(t, crossRec)["status_code"].(float64)); got != 10008 {
+		t.Fatalf("cross-merchant status_code = %d, want 10008", got)
+	}
+}
+
+func TestMerchantOrderQueryRejectsMissingIdentifierAndBadSignature(t *testing.T) {
+	e := setupTestEnv(t)
+	useRspErrorHTTPStatuses(e)
+
+	missingRec := doPost(e, "/payments/gmpay/v1/order/query", signBody(map[string]interface{}{}))
+	if missingRec.Code != http.StatusBadRequest {
+		t.Fatalf("missing identifier status = %d, want 400", missingRec.Code)
+	}
+	if got := int(parseResp(t, missingRec)["status_code"].(float64)); got != 10009 {
+		t.Fatalf("missing identifier status_code = %d, want 10009", got)
+	}
+
+	badSignatureRec := doPost(e, "/payments/gmpay/v1/order/query", map[string]interface{}{
+		"pid":       testAPIToken,
+		"order_id":  "test-merchant-query-unknown",
+		"signature": strings.Repeat("0", sha256.Size*2),
+	})
+	if badSignatureRec.Code != http.StatusUnauthorized {
+		t.Fatalf("bad signature status = %d, want 401", badSignatureRec.Code)
 	}
 }
 

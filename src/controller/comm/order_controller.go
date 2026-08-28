@@ -64,6 +64,33 @@ func (c *BaseCommController) CreateTransaction(ctx echo.Context) (err error) {
 	return c.SucJson(ctx, resp)
 }
 
+// QueryMerchantOrder returns a complete HMAC-signed order view. The request is
+// independently authenticated by CheckApiSign before this handler runs.
+// @Summary      Query merchant order
+// @Description  Query by order_id, trade_id, or both. Both identifiers must refer to the same order and the order must belong to the signed pid.
+// @Tags         Payment
+// @Accept       json
+// @Produce      json
+// @Param        request body request.MerchantOrderQueryRequest true "Signed merchant order query"
+// @Success      200 {object} response.ApiResponse{data=response.MerchantOrderQueryResponse}
+// @Failure      400 {object} response.ApiResponse "Stable errno: 10008 order not found, 10009 invalid params"
+// @Failure      401 {object} response.ApiResponse "Signature verification failed"
+// @Router       /payments/gmpay/v1/order/query [post]
+func (c *BaseCommController) QueryMerchantOrder(ctx echo.Context) (err error) {
+	req := new(request.MerchantOrderQueryRequest)
+	if err = ctx.Bind(req); err != nil {
+		return c.FailJson(ctx, constant.ParamsMarshalErr)
+	}
+	if err = c.ValidateStruct(ctx, req); err != nil {
+		return c.FailJson(ctx, err)
+	}
+	resp, err := service.QueryMerchantOrder(req, apiKeyFromContext(ctx))
+	if err != nil {
+		return c.FailJson(ctx, err)
+	}
+	return c.SucJson(ctx, resp)
+}
+
 // SwitchNetwork 切换支付网络，补全占位父单或创建/返回子订单
 // @Summary      Switch payment network
 // @Description  Switch to a different payment target. A status=4 placeholder is completed in place and returns the same parent trade_id with is_selected=false; an already concrete status=1 parent creates or returns the only sub-order when switching to a different target.

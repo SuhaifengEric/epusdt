@@ -130,6 +130,7 @@ func TestProcessExpiredOrdersKeepsPaidOrdersPaid(t *testing.T) {
 		ActualAmount:       1,
 		ReceiveAddress:     "wallet_1",
 		Token:              "USDT",
+		Network:            mdb.NetworkTron,
 		Status:             mdb.StatusPaySuccess,
 		NotifyUrl:          "https://merchant.example/callback",
 		BlockTransactionId: "block_paid",
@@ -480,6 +481,7 @@ func TestSendOrderCallbackGmpayUsesApiKeySecretByPid(t *testing.T) {
 		ActualAmount:       1,
 		ReceiveAddress:     "wallet_gmpay",
 		Token:              "USDT",
+		Network:            mdb.NetworkTron,
 		Status:             mdb.StatusPaySuccess,
 		NotifyUrl:          server.URL,
 		BlockTransactionId: "block_gmpay_sign",
@@ -496,6 +498,12 @@ func TestSendOrderCallbackGmpayUsesApiKeySecretByPid(t *testing.T) {
 	}
 	if gotPid, _ := received["pid"].(string); gotPid != key.Pid {
 		t.Fatalf("payload pid = %q, want %q", gotPid, key.Pid)
+	}
+	if gotCurrency, _ := received["currency"].(string); gotCurrency != order.Currency {
+		t.Fatalf("payload currency = %q, want %q", gotCurrency, order.Currency)
+	}
+	if gotNetwork, _ := received["network"].(string); gotNetwork != order.Network {
+		t.Fatalf("payload network = %q, want %q", gotNetwork, order.Network)
 	}
 	if _, ok := received["payment_type"]; ok {
 		t.Fatal("GMPay callback payload must not include payment_type")

@@ -19,6 +19,7 @@ import (
 	"github.com/GMWalletApp/epusdt/util/log"
 	"github.com/GMWalletApp/epusdt/util/math"
 	"github.com/GMWalletApp/epusdt/util/security"
+	"github.com/GMWalletApp/epusdt/util/sign"
 	"github.com/dromara/carbon/v2"
 	"github.com/shopspring/decimal"
 )
@@ -104,10 +105,30 @@ func buildCreateTransactionResponse(order *mdb.Orders) *response.CreateTransacti
 		ActualAmount:   order.ActualAmount,
 		ReceiveAddress: order.ReceiveAddress,
 		Token:          order.Token,
+		Network:        order.Network,
 		Status:         order.Status,
-		ExpirationTime: carbon.Now().AddMinutes(config.GetOrderExpirationTime()).Timestamp(),
+		ExpirationTime: order.CreatedAt.AddMinutes(config.GetOrderExpirationTime()).Timestamp(),
 		PaymentUrl:     fmt.Sprintf("%s/pay/checkout-counter/%s", config.GetAppUri(), order.TradeId),
 	}
+}
+
+func createRequestMatchesOrder(req *request.CreateTransactionRequest, order *mdb.Orders, apiKey *mdb.ApiKey, payAmount float64, currency, token, network, notifyURL, paymentType, epayType string) bool {
+	if order == nil || order.ID == 0 {
+		return false
+	}
+	precision := int32(data.GetAmountPrecision())
+	if !decimal.NewFromFloat(order.Amount).Round(precision).Equal(decimal.NewFromFloat(payAmount).Round(precision)) {
+		return false
+	}
+	return order.ApiKeyID == apiKeyID(apiKey) &&
+		order.Currency == currency &&
+		order.Token == token &&
+		order.Network == network &&
+		strings.TrimSpace(order.NotifyUrl) == notifyURL &&
+		strings.TrimSpace(order.RedirectUrl) == strings.TrimSpace(req.RedirectUrl) &&
+		order.Name == req.Name &&
+		order.PaymentType == paymentType &&
+		order.EpayType == epayType
 }
 
 // CreateTransaction creates a new payment order.
@@ -141,7 +162,10 @@ func CreateTransaction(req *request.CreateTransactionRequest, apiKey *mdb.ApiKey
 		return nil, err
 	}
 	if exist.ID > 0 {
-		return nil, constant.OrderAlreadyExists
+		if createRequestMatchesOrder(req, exist, apiKey, payAmount, currency, token, network, notifyURL, paymentType, epayType) {
+			return buildCreateTransactionResponse(exist), nil
+		}
+		return nil, constant.OrderImmutableConflict
 	}
 
 	decimalPayAmount := decimal.NewFromFloat(payAmount)
@@ -237,6 +261,46 @@ func CreateTransaction(req *request.CreateTransactionRequest, apiKey *mdb.ApiKey
 	}
 
 	return buildCreateTransactionResponse(order), nil
+}
+
+// QueryMerchantOrder returns a complete signed order view scoped to the
+// authenticated API key. A response signature lets merchants reject a forged
+// or incomplete query response even after the request was authenticated.
+func QueryMerchantOrder(req *request.MerchantOrderQueryRequest, apiKey *mdb.ApiKey) (*response.MerchantOrderQueryResponse, error) {
+	if req == nil || apiKey == nil || apiKey.ID == 0 {
+		return nil, constant.SignatureErr
+	}
+	orderID := strings.TrimSpace(req.OrderId)
+	tradeID := strings.TrimSpace(req.TradeId)
+	if orderID == "" && tradeID == "" {
+		return nil, constant.ParamsMarshalErr
+	}
+	order, err := data.GetMerchantOrder(apiKey.ID, orderID, tradeID)
+	if err != nil {
+		return nil, err
+	}
+	if order == nil || order.ID == 0 {
+		return nil, constant.OrderNotExists
+	}
+	resp := &response.MerchantOrderQueryResponse{
+		Pid:                apiKey.Pid,
+		TradeId:            order.TradeId,
+		OrderId:            order.OrderId,
+		Amount:             order.Amount,
+		Currency:           order.Currency,
+		ActualAmount:       order.ActualAmount,
+		ReceiveAddress:     order.ReceiveAddress,
+		Token:              order.Token,
+		Network:            order.Network,
+		BlockTransactionId: order.BlockTransactionId,
+		Status:             order.Status,
+		ExpirationTime:     order.CreatedAt.AddMinutes(config.GetOrderExpirationTime()).Timestamp(),
+	}
+	resp.Signature, err = sign.GetHMACSHA256(*resp, apiKey.SecretKey)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 // OrderProcessing marks an order as paid and releases its sqlite reservation.

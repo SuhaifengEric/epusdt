@@ -88,6 +88,97 @@ func TestCreateTransactionRejectsPrivateNotifyURL(t *testing.T) {
 	}
 }
 
+func TestCreateTransactionIsStrictlyIdempotent(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if _, err := data.AddWalletAddress("wallet_idempotent_1"); err != nil {
+		t.Fatalf("add wallet: %v", err)
+	}
+	req := newCreateTransactionRequest("order_idempotent_1", 10)
+	first, err := CreateTransaction(req, nil)
+	if err != nil {
+		t.Fatalf("create first transaction: %v", err)
+	}
+	second, err := CreateTransaction(req, nil)
+	if err != nil {
+		t.Fatalf("repeat identical transaction: %v", err)
+	}
+	if second.TradeId != first.TradeId || second.PaymentUrl != first.PaymentUrl {
+		t.Fatalf("repeat returned a different order: first=%+v second=%+v", first, second)
+	}
+	if second.Network != mdb.NetworkTron {
+		t.Fatalf("repeat network = %q, want %q", second.Network, mdb.NetworkTron)
+	}
+
+	conflict := *req
+	conflict.Amount = 10.01
+	if _, err = CreateTransaction(&conflict, nil); err != constant.OrderImmutableConflict {
+		t.Fatalf("conflicting repeat error = %v, want %v", err, constant.OrderImmutableConflict)
+	}
+
+	var orderCount int64
+	if err = dao.Mdb.Model(&mdb.Orders{}).Where("order_id = ?", req.OrderId).Count(&orderCount).Error; err != nil {
+		t.Fatalf("count orders: %v", err)
+	}
+	if orderCount != 1 {
+		t.Fatalf("order count = %d, want 1", orderCount)
+	}
+}
+
+func TestCreateTransactionConcurrentIdenticalRequestsReturnOneOrder(t *testing.T) {
+	cleanup := testutil.SetupTestDatabases(t)
+	defer cleanup()
+
+	if _, err := data.AddWalletAddress("wallet_idempotent_concurrent_1"); err != nil {
+		t.Fatalf("add wallet: %v", err)
+	}
+	req := newCreateTransactionRequest("order_idempotent_concurrent_1", 10)
+
+	const callers = 16
+	tradeIDs := make(chan string, callers)
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := CreateTransaction(req, nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			tradeIDs <- resp.TradeId
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	close(tradeIDs)
+	for err := range errs {
+		t.Fatalf("concurrent create failed: %v", err)
+	}
+	var expected string
+	for tradeID := range tradeIDs {
+		if expected == "" {
+			expected = tradeID
+		}
+		if tradeID != expected {
+			t.Fatalf("concurrent trade_id = %q, want %q", tradeID, expected)
+		}
+	}
+	if expected == "" {
+		t.Fatal("no concurrent create response")
+	}
+
+	var orderCount int64
+	if err := dao.Mdb.Model(&mdb.Orders{}).Where("order_id = ?", req.OrderId).Count(&orderCount).Error; err != nil {
+		t.Fatalf("count orders: %v", err)
+	}
+	if orderCount != 1 {
+		t.Fatalf("order count = %d, want 1", orderCount)
+	}
+}
+
 func TestCreateTransactionCreatesWaitSelectPlaceholderWithoutTokenNetwork(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()

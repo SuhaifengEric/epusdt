@@ -21,6 +21,25 @@ type CreateTransactionRequest struct {
 	EpayType    string `json:"-" form:"-"`
 }
 
+// MerchantOrderQueryRequest is the signed merchant lookup used to recover an
+// order when the create response was lost. At least one order identifier is
+// required; when both are provided they must identify the same order.
+type MerchantOrderQueryRequest struct {
+	Pid       string `json:"pid" form:"pid" validate:"required" example:"1000"`
+	OrderId   string `json:"order_id" form:"order_id" example:"ORD20260416001"`
+	TradeId   string `json:"trade_id" form:"trade_id" example:"3nQ9pL2xV7sK1mR8cT4yB_aZ"`
+	Signature string `json:"signature" form:"signature" validate:"required" example:"498975a97bc34563bdb14df53fc18054645df9684d6c67d9b9dd90ec62be1018"`
+}
+
+func (r MerchantOrderQueryRequest) Translates() map[string]string {
+	return validate.MS{
+		"Pid":       "商户 PID",
+		"OrderId":   "商户订单号",
+		"TradeId":   "交易号",
+		"Signature": "签名",
+	}
+}
+
 func (r CreateTransactionRequest) Translates() map[string]string {
 	return validate.MS{
 		"OrderId":   "订单号",

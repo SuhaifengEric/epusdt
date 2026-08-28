@@ -9,6 +9,7 @@
 | 场景 | 方法 | 路径 | 是否需要签名 |
 | --- | --- | --- | --- |
 | 创建 GMPay 交易 | POST | `/payments/gmpay/v1/order/create-transaction` | 是 |
+| 查询 GMPay 商户订单 | POST | `/payments/gmpay/v1/order/query` | 是 |
 | 获取公开支付配置 | GET | `/payments/gmpay/v1/config` | 否 |
 | 收银台页面 | GET | `/pay/checkout-counter/{trade_id}` | 否 |
 | 收银台初始化数据 | GET | `/pay/checkout-counter-resp/{trade_id}` | 否 |
@@ -164,7 +165,7 @@ function epaySign(array $params, string $secretKey): string
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `pid` | string | 是 | 商户 PID，用于查找 API Key，并参与签名。 |
-| `order_id` | string | 是 | 商户订单号，最长 32 字符，不能重复。 |
+| `order_id` | string | 是 | 商户订单号，最长 32 字符；同一订单号的重复请求遵循下述严格幂等规则。 |
 | `currency` | string | 是 | 法币币种，如 `cny`、`usd`。 |
 | `token` | string | 条件必填 | 收款币种，如 `usdt`、`trx`、`usdc`、`sol`。GMPay 可与 `network` 同时省略以创建状态 `4` 占位订单。 |
 | `network` | string | 条件必填 | 收款网络，如 `tron`、`solana`、`ethereum`、`bsc`、`polygon`、`plasma`。GMPay 可与 `token` 同时省略以创建状态 `4` 占位订单。 |
@@ -193,6 +194,7 @@ function epaySign(array $params, string $secretKey): string
     "actual_amount": 14.29,
     "receive_address": "TTestTronAddress001",
     "token": "USDT",
+    "network": "tron",
     "status": 1,
     "expiration_time": 1779530812,
     "payment_url": "https://pay.example.com/pay/checkout-counter/20260523171652123456001"
@@ -210,11 +212,72 @@ function epaySign(array $params, string $secretKey): string
 | `actual_amount` | number | 实际需支付的加密货币数量。 |
 | `receive_address` | string | 收款地址。 |
 | `token` | string | 收款币种。 |
+| `network` | string | 收款网络。状态 `4` 占位订单为空字符串。 |
 | `status` | integer | 订单状态。状态 `4` 表示等待用户选择 `token/network`。 |
 | `expiration_time` | integer | 订单过期时间，秒级时间戳。 |
 | `payment_url` | string | 收银台地址。该地址会跳转到前端收银台。 |
 
 状态 `4` 占位订单的 `actual_amount` 为 `0`，`receive_address` 和 `token` 为空；过期任务或后台关闭只会把它改为状态 `3`，不会执行交易金额解锁。第一次成功调用 `/pay/switch-network` 时，如果选择普通链上 `token/network`，同一个父订单会原地补全链上字段并变为状态 `1`，此时才会创建真实交易锁；如果选择 `network=okpay`，同一个父订单会原地变为 OkPay 订单并返回 OkPay 托管支付链接，不创建子订单，也不会分配本系统钱包地址或链上锁。占位父单首次补全后 `is_selected` 仍为 `false`，后续同目标选择才会把父单标记为已选中；如果后续切到其它支付目标，则创建唯一一条子订单。
+
+### 严格幂等语义
+
+相同 `order_id` 的重试只有在不可变字段与原订单一致时才视为幂等成功。不可变字段包括所属 PID、规范化后的 `amount/currency/token/network`、`notify_url`、`redirect_url`、`name`、`payment_type` 和 EPay 类型。幂等成功会返回原订单、原 `trade_id`、原支付地址和基于原创建时间计算的过期时间，不会创建新订单或重新分配金额通道。
+
+如果任一不可变字段冲突，接口返回 HTTP 409，响应体 `status_code` 为 `10047`。客户端不得用冲突响应覆盖本地原订单；应使用新的 `order_id` 创建另一笔业务订单。
+
+如果客户端提交建单请求后未收到响应，应使用下面的签名查单接口按原 `order_id` 恢复结果，不要盲目更换参数重试。
+
+## 查询 GMPay 商户订单
+
+`POST /payments/gmpay/v1/order/query`
+
+该接口用于在建单响应丢失后恢复原订单，也可用于商户后台核对订单。查询只能访问当前签名 PID 所属的订单，不会返回其他商户数据。
+
+### 请求示例
+
+```json
+{
+  "pid": "1000",
+  "order_id": "ORD202605230001",
+  "signature": "bfe09f829d2a2d2c5b7fcbdcf7c6971ed958794b1b75c4f261150be85e28779b"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `pid` | string | 是 | 商户 PID，必须参与请求签名。 |
+| `order_id` | string | 条件必填 | 商户订单号；与 `trade_id` 至少提供一个。 |
+| `trade_id` | string | 条件必填 | Epusdt 交易号；与 `order_id` 至少提供一个。 |
+| `signature` | string | 是 | 请求参数的 GMPay HMAC-SHA256 签名。 |
+
+同时提供 `order_id` 和 `trade_id` 时，两者必须指向同一订单。标识不匹配、订单不存在或订单不属于当前 PID 时统一返回 HTTP 400 / `10008`；两种标识都缺失时返回 HTTP 400 / `10009`；请求签名错误时返回 HTTP 401。
+
+### 成功响应
+
+```json
+{
+  "status_code": 200,
+  "message": "success",
+  "data": {
+    "pid": "1000",
+    "trade_id": "20260523171652123456001",
+    "order_id": "ORD202605230001",
+    "amount": 100,
+    "currency": "CNY",
+    "actual_amount": 14.29,
+    "receive_address": "TTestTronAddress001",
+    "token": "USDT",
+    "network": "tron",
+    "block_transaction_id": "",
+    "status": 1,
+    "expiration_time": 1779530812,
+    "signature": "c0f4a69f9fb6296a39f8e72b546a420884b6fb44e8f30b059dfa5a7605ae9923"
+  },
+  "request_id": "b1344d70-ff19-4543-b601-37abfb3b3686"
+}
+```
+
+`data.signature` 是服务端对 `data` 中其余所有非空字段计算的 GMPay HMAC-SHA256 签名。客户端必须先验证响应签名，再核对 `pid/order_id/trade_id/amount/currency/token/network/status`；支付成功状态还必须核对非空 `block_transaction_id`。`actual_amount` 只表示链上应付或实付数量，不能替代商户业务金额 `amount`。
 
 ## 获取公开支付配置
 
@@ -495,11 +558,13 @@ EPay 接口解析 `type/token/network/currency` 的规则：
   "trade_id": "20260523171652123456001",
   "order_id": "ORD202605230001",
   "amount": 100,
+  "currency": "CNY",
   "actual_amount": 14.29,
   "receive_address": "TTestTronAddress001",
   "token": "USDT",
+  "network": "tron",
   "block_transaction_id": "0xabc123...",
-  "signature": "498975a97bc34563bdb14df53fc18054645df9684d6c67d9b9dd90ec62be1018",
+  "signature": "b0b231f0dbe00e5a83a3c9fd134d2d2c45de77ad83ce46a00e0962ee6281c122",
   "status": 2
 }
 ```
@@ -510,14 +575,16 @@ EPay 接口解析 `type/token/network/currency` 的规则：
 | `trade_id` | string | Epusdt 交易号。 |
 | `order_id` | string | 商户订单号。 |
 | `amount` | number | 商户提交的法币金额。 |
+| `currency` | string | 法币币种。 |
 | `actual_amount` | number | 实际到账的加密货币数量。 |
 | `receive_address` | string | 收款地址。 |
 | `token` | string | 收款币种。 |
+| `network` | string | 收款网络。 |
 | `block_transaction_id` | string | 链上交易哈希或第三方支付订单号。 |
 | `signature` | string | 64 位小写十六进制 HMAC-SHA256 回调签名。 |
 | `status` | integer | 当前仅支付成功时回调，值为 `2`。 |
 
-GMPay 回调验签方式与创建订单一致：排除 `signature` 字段后，使用商户 `secret_key` 对规范化参数字符串计算 HMAC-SHA256。回调体不包含 `payment_type` 字段。
+GMPay 回调验签方式与创建订单一致：排除 `signature` 字段后，使用商户 `secret_key` 对规范化参数字符串计算 HMAC-SHA256。`pid/trade_id/order_id/amount/currency/actual_amount/receive_address/token/network/block_transaction_id/status` 中的所有非空字段都参与签名；回调体不包含 `payment_type` 字段。商户必须在验签成功后再核对 PID、订单号、交易号、业务金额、币种、网络、token 和链上交易号。
 
 ### EPay 兼容回调
 
@@ -586,3 +653,4 @@ Epusdt 会按配置的 OkPay shop token 验证 OkPay 签名，成功后将对应
 | `10017` | 400 | 支付服务商未启用 |
 | `10018` | 400 | 支付服务商配置不完整 |
 | `10019` | 400 | 支付服务商不支持该币种或网络 |
+| `10047` | 409 | 同一 `order_id` 的不可变字段冲突 |

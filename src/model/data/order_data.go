@@ -117,6 +117,22 @@ func GetOrderInfoByTradeId(tradeId string) (*mdb.Orders, error) {
 	return order, err
 }
 
+// GetMerchantOrder returns an order only when it belongs to the authenticated
+// API key. Optional identifiers are combined so callers cannot mix an order_id
+// from one order with a trade_id from another.
+func GetMerchantOrder(apiKeyID uint64, orderID, tradeID string) (*mdb.Orders, error) {
+	order := new(mdb.Orders)
+	query := dao.Mdb.Model(order).Where("api_key_id = ?", apiKeyID)
+	if orderID != "" {
+		query = query.Where("order_id = ?", orderID)
+	}
+	if tradeID != "" {
+		query = query.Where("trade_id = ?", tradeID)
+	}
+	err := query.Limit(1).Find(order).Error
+	return order, err
+}
+
 // CreateOrderWithTransaction creates an order in the active database transaction.
 func CreateOrderWithTransaction(tx *gorm.DB, order *mdb.Orders) error {
 	return tx.Model(order).Create(order).Error
