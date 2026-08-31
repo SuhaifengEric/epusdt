@@ -2,8 +2,10 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/GMWalletApp/epusdt/model/data"
@@ -154,6 +156,7 @@ func runEvmBackfillLoop(ctx context.Context, client *ethclient.Client, network, 
 	if err != nil {
 		return err
 	}
+	batchSize := evmBackfillBatchSize(network)
 
 	for {
 		if ctx.Err() != nil {
@@ -197,7 +200,7 @@ func runEvmBackfillLoop(ctx context.Context, client *ethclient.Client, network, 
 		}
 
 		fromBlock := lastBlock + 1
-		toBlock := fromBlock + evmBackfillBatchSize(network) - 1
+		toBlock := fromBlock + batchSize - 1
 		if toBlock > confirmedHead {
 			toBlock = confirmedHead
 		}
@@ -218,6 +221,15 @@ func runEvmBackfillLoop(ctx context.Context, client *ethclient.Client, network, 
 		logs, err := client.FilterLogs(rpcCtx, batchQuery)
 		cancel()
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			attemptedBlocks := toBlock - fromBlock + 1
+			if nextBatchSize, ok := reduceEvmBackfillBatchSize(err, attemptedBlocks); ok {
+				log.Sugar.Warnf("%s RPC rejected eth_getLogs range=%d-%d blocks=%d, retrying with blocks=%d: %v", logPrefix, fromBlock, toBlock, attemptedBlocks, nextBatchSize, err)
+				batchSize = nextBatchSize
+				continue
+			}
 			return fmt.Errorf("filter logs range=%d-%d: %w", fromBlock, toBlock, err)
 		}
 
@@ -305,6 +317,42 @@ func evmBackfillBatchSize(network string) int64 {
 		return 200
 	}
 	return evmBackfillBatchBlocks
+}
+
+func reduceEvmBackfillBatchSize(err error, attemptedBlocks int64) (int64, bool) {
+	if attemptedBlocks <= 1 || !isEvmLogRangeLimitError(err) {
+		return 0, false
+	}
+	next := attemptedBlocks / 2
+	if next < 1 {
+		next = 1
+	}
+	return next, true
+}
+
+func isEvmLogRangeLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	type rpcErrorCoder interface {
+		ErrorCode() int
+	}
+	var rpcErr rpcErrorCoder
+	code := 0
+	if errors.As(err, &rpcErr) {
+		code = rpcErr.ErrorCode()
+	}
+
+	message := strings.ToLower(err.Error())
+	if code == -32005 && strings.Contains(message, "limit") {
+		return true
+	}
+	if code != -32000 && code != -32602 {
+		return false
+	}
+	return strings.Contains(message, "range") &&
+		(strings.Contains(message, "limit") || strings.Contains(message, "exceed"))
 }
 
 func confirmedEvmHead(head int64, minConfirmations int) int64 {
