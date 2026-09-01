@@ -587,10 +587,6 @@ func submitManualPaymentForOrder(order *mdb.Orders, blockTransactionId string, a
 	}, nil
 }
 
-func validateManualPaymentOrder(order *mdb.Orders) error {
-	return validateManualPaymentOrderWithStatuses(order, manualPaymentWaitPayStatuses)
-}
-
 func validateManualPaymentOrderWithStatuses(order *mdb.Orders, allowedStatuses []int) error {
 	if !manualPaymentStatusAllowed(order.Status, allowedStatuses) {
 		return constant.OrderNotWaitPay

@@ -58,8 +58,10 @@ func setupTestEnv(t *testing.T) *echo.Echo {
 	}
 
 	// init config paths
-	os.Setenv("EPUSDT_CONFIG", tmpDir)
-	defer os.Unsetenv("EPUSDT_CONFIG")
+	if err := os.Setenv("EPUSDT_CONFIG", tmpDir); err != nil {
+		t.Fatalf("set EPUSDT_CONFIG: %v", err)
+	}
+	defer func() { _ = os.Unsetenv("EPUSDT_CONFIG") }()
 
 	// init DB
 	if err := dao.DBInit(); err != nil {
@@ -90,7 +92,7 @@ func setupTestEnv(t *testing.T) *echo.Echo {
 	})
 
 	// ensure tables exist (MdbTableInit uses sync.Once, so migrate directly)
-	dao.Mdb.AutoMigrate(
+	if err := dao.Mdb.AutoMigrate(
 		&mdb.Orders{},
 		&mdb.WalletAddress{},
 		&mdb.AdminUser{},
@@ -102,7 +104,9 @@ func setupTestEnv(t *testing.T) *echo.Echo {
 		&mdb.ChainToken{},
 		&mdb.RpcNode{},
 		&mdb.ProviderOrder{},
-	)
+	); err != nil {
+		t.Fatalf("automigrate: %v", err)
+	}
 
 	// reset the settings cache so stale entries from a prior test don't leak
 	_ = data.ReloadSettings()
@@ -565,7 +569,9 @@ func TestCreateOrderGmpayV1SolNative(t *testing.T) {
 	t.Logf("Status: %d, Body: %s", rec.Code, rec.Body.String())
 
 	var resp map[string]interface{}
-	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	t.Logf("Response: %v", resp)
 
 	// This may fail if rate API is not configured, which is expected in test
@@ -1493,7 +1499,9 @@ func TestCreateOrderNetworkIsolation(t *testing.T) {
 	rec := doPost(e, "/payments/gmpay/v1/order/create-transaction", body)
 
 	var resp map[string]interface{}
-	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 
 	data, ok := resp["data"].(map[string]interface{})
 	if !ok {
@@ -2710,7 +2718,9 @@ func TestSwitchNetwork_MissingFields(t *testing.T) {
 	}
 	// Must return a non-200 business code for validation failure.
 	var resp map[string]interface{}
-	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if code, _ := resp["code"].(float64); code == 200 {
 		t.Fatal("expected validation error for missing fields, got code=200")
 	}
@@ -2750,7 +2760,9 @@ func TestSwitchNetwork_WithOrder(t *testing.T) {
 		t.Fatalf("create parent order failed: %d %s", createRec.Code, createRec.Body.String())
 	}
 	var createResp map[string]interface{}
-	json.Unmarshal(createRec.Body.Bytes(), &createResp)
+	if err := json.Unmarshal(createRec.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
 	tradeId, _ := createResp["data"].(map[string]interface{})["trade_id"].(string)
 	if tradeId == "" {
 		t.Fatal("no trade_id in create response")
@@ -2767,7 +2779,9 @@ func TestSwitchNetwork_WithOrder(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	var resp map[string]interface{}
-	json.Unmarshal(rec.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if resp["data"] == nil {
 		t.Fatal("expected data in switch-network response")
 	}

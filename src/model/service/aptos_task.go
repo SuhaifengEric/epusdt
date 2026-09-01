@@ -356,10 +356,6 @@ func validateManualAptosPaymentWithNode(order *mdb.Orders, txID string, node mdb
 	return txID, nil
 }
 
-func validateManualAptosTransaction(order *mdb.Orders, txID string, body []byte) error {
-	return validateManualAptosTransactionWithConfirm(order, txID, body, EnsureAptosTransferConfirmed)
-}
-
 func validateManualAptosTransactionWithConfirm(order *mdb.Orders, txID string, body []byte, confirm func(int64) error) error {
 	tokens, err := data.ListEnabledChainTokensByNetwork(mdb.NetworkAptos)
 	if err != nil {
@@ -459,8 +455,11 @@ func aptosGetWithNode(node mdb.RpcNode, path string) (body []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	body, _ = io.ReadAll(resp.Body)
+	defer func() { _ = resp.Body.Close() }()
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return nil, readErr
+	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return nil, fmt.Errorf("aptos rpc HTTP %d: %s", resp.StatusCode, string(body))
 	}

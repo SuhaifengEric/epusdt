@@ -7,20 +7,13 @@ import (
 	"github.com/gookit/validate/locales/zhcn"
 	"github.com/gookit/validate/locales/zhtw"
 	"github.com/labstack/echo/v4"
-	"sync"
 )
 
 var Ctrl = &BaseController{}
 
-type validatorBase struct {
-	once     sync.Once
-	validate *validate.Validation
-}
-
 type BaseController struct {
 	http.Resp
-	Validator validatorBase
-	Locale    string
+	Locale string
 }
 
 func (c *BaseController) GetLocale(ctx echo.Context) string {

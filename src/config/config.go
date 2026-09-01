@@ -147,7 +147,7 @@ func copyFile(srcPath, dstPath string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	out, err := os.OpenFile(dstPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -250,7 +250,7 @@ func ResolveConfigPath() (path string, exists bool) {
 	info, err := os.Stat(p)
 	if err == nil && info.IsDir() {
 		p = filepath.Join(p, ".env")
-		info, err = os.Stat(p)
+		_, err = os.Stat(p)
 	}
 	if err != nil {
 		return p, false

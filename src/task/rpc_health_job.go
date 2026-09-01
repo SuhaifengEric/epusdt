@@ -91,7 +91,7 @@ func MeasureTCPDial(addr string, timeout time.Duration) (time.Duration, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	return time.Since(start), nil
 }

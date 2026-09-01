@@ -120,7 +120,7 @@ func EnsureMoveTransferMatchesOrder(order *mdb.Orders, transfer MoveObservedTran
 	if order == nil || order.ID == 0 {
 		return fmt.Errorf("order not found")
 	}
-	if strings.ToLower(strings.TrimSpace(order.Network)) != strings.ToLower(strings.TrimSpace(transfer.Network)) {
+	if !strings.EqualFold(strings.TrimSpace(order.Network), strings.TrimSpace(transfer.Network)) {
 		return fmt.Errorf("network mismatch")
 	}
 	orderAddr, err := addressutil.NormalizeMoveAddress(order.ReceiveAddress)

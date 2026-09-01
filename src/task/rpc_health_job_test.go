@@ -109,7 +109,7 @@ func TestMeasureTCPDial_Success(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	dur, err := MeasureTCPDial(ln.Addr().String(), 2*time.Second)
 	if err != nil {
@@ -135,7 +135,7 @@ func TestMeasureTCPDial_RespectsTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	// Set backlog to 0 by not calling Accept and filling the queue.
 	// Connect once to fill the backlog, then the next dial should stall.
@@ -143,7 +143,7 @@ func TestMeasureTCPDial_RespectsTimeout(t *testing.T) {
 	if err != nil {
 		t.Skip("could not saturate backlog, skipping")
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Use a very short timeout to verify it doesn't hang forever.
 	_, dialErr := MeasureTCPDial(ln.Addr().String(), 100*time.Millisecond)
@@ -159,7 +159,7 @@ func TestProbeNode_Reachable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	port := ln.Addr().(*net.TCPAddr).Port
 	url := "http://127.0.0.1:" + strconv.Itoa(port)

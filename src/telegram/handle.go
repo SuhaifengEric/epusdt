@@ -46,7 +46,7 @@ func OnTextMessageHandle(c tb.Context) error {
 	}
 
 	if isReplyFlow {
-		defer bots.Delete(msg.ReplyTo)
+		defer func() { _ = bots.Delete(msg.ReplyTo) }()
 	}
 
 	msgText := strings.TrimSpace(msg.Text)

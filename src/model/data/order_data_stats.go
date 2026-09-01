@@ -32,7 +32,7 @@ type AddressDailyStat struct {
 func statsBucketExpr(column string, hourly bool) (string, error) {
 	dialect := "sqlite"
 	if dao.Mdb != nil && dao.Mdb.Dialector != nil {
-		dialect = dao.Mdb.Dialector.Name()
+		dialect = dao.Mdb.Name()
 	}
 	return statsBucketExprForDialect(dialect, column, hourly)
 }

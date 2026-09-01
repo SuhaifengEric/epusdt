@@ -37,8 +37,7 @@ func MysqlInit() error {
 		color.Red.Printf("[store_db] mysql get DB,err=%s\n", err)
 		// panic(err)
 		time.Sleep(10 * time.Second)
-		MysqlInit()
-		return err
+		return MysqlInit()
 	}
 	sqlDB.SetMaxIdleConns(viper.GetInt("mysql_max_idle_conns"))
 	sqlDB.SetMaxOpenConns(viper.GetInt("mysql_max_open_conns"))
@@ -48,8 +47,7 @@ func MysqlInit() error {
 		color.Red.Printf("[store_db] mysql connDB err:%s", err.Error())
 		// panic(err)
 		time.Sleep(10 * time.Second)
-		MysqlInit()
-		return err
+		return MysqlInit()
 	}
 	log.Sugar.Debug("[store_db] mysql connDB success")
 	return nil

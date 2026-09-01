@@ -637,7 +637,7 @@ func tronPostJSON(baseURL, apiKey, path string, body interface{}, out interface{
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(raw))
@@ -982,14 +982,6 @@ func ensureSolanaTransferNotBeforeOrder(blockTime int64, order *mdb.Orders) erro
 		return fmt.Errorf("transaction predates the order")
 	}
 	return nil
-}
-
-func ensureSolanaConfirmations(network, sig string) error {
-	rpcURL, err := resolveSolanaRpcURL()
-	if err != nil {
-		return err
-	}
-	return ensureSolanaConfirmationsWithRPC(network, sig, rpcURL)
 }
 
 func ensureSolanaConfirmationsWithRPC(network, sig string, rpcURL string) error {

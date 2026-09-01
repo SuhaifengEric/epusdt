@@ -30,10 +30,6 @@ func normalizeAmount(amount float64, precision int) (int64, string) {
 	return value.Shift(int32(precision)).IntPart(), value.StringFixed(int32(precision))
 }
 
-func normalizeLockAmount(amount float64) (int64, string) {
-	return normalizeAmount(amount, GetAmountPrecision())
-}
-
 func normalizeLockNetwork(network string) string {
 	return strings.ToLower(strings.TrimSpace(network))
 }

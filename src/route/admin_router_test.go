@@ -203,7 +203,9 @@ func TestAdminLogin_WrongPassword(t *testing.T) {
 	t.Logf("Login wrong-password response: status=%d body=%s", rec.Code, rec.Body.String())
 	if rec.Code == http.StatusOK {
 		var resp map[string]interface{}
-		json.Unmarshal(rec.Body.Bytes(), &resp)
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode login response: %v", err)
+		}
 		if code, _ := resp["code"].(float64); code == 200 {
 			t.Fatal("expected failure for wrong password, got 200")
 		}
@@ -220,7 +222,9 @@ func TestAdminLogin_MissingFields(t *testing.T) {
 	t.Logf("Login missing-fields response: status=%d body=%s", rec.Code, rec.Body.String())
 	if rec.Code == http.StatusOK {
 		var resp map[string]interface{}
-		json.Unmarshal(rec.Body.Bytes(), &resp)
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode validation response: %v", err)
+		}
 		if code, _ := resp["code"].(float64); code == 200 {
 			t.Fatal("expected validation failure, got code=200")
 		}
@@ -293,7 +297,9 @@ func TestAdminChangePassword(t *testing.T) {
 		"password": testAdminPassword,
 	})
 	var resp2 map[string]interface{}
-	json.Unmarshal(rec2.Body.Bytes(), &resp2)
+	if err := json.Unmarshal(rec2.Body.Bytes(), &resp2); err != nil {
+		t.Fatalf("decode old-password response: %v", err)
+	}
 	code2, _ := resp2["code"].(float64)
 	if code2 == 200 {
 		t.Fatal("old password should no longer work after change")
@@ -1206,7 +1212,7 @@ func TestAdminDashboardRpcStatsSSE(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sse request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("sse status = %d, want 200", resp.StatusCode)
 	}
@@ -2321,7 +2327,9 @@ func TestAdminOrders_ListWithSubExcludesSubOrdersFromTopLevel(t *testing.T) {
 		t.Fatalf("create parent: got %d: %s", rec.Code, rec.Body.String())
 	}
 	var parentResp map[string]interface{}
-	json.Unmarshal(rec.Body.Bytes(), &parentResp)
+	if err := json.Unmarshal(rec.Body.Bytes(), &parentResp); err != nil {
+		t.Fatalf("decode parent response: %v", err)
+	}
 	parentTradeId := parentResp["data"].(map[string]interface{})["trade_id"].(string)
 
 	// Switch to Ethereum to create a sub-order (no signature required).
@@ -2335,7 +2343,9 @@ func TestAdminOrders_ListWithSubExcludesSubOrdersFromTopLevel(t *testing.T) {
 		t.Fatalf("switch network: got %d: %s", rec.Code, rec.Body.String())
 	}
 	var switchResp map[string]interface{}
-	json.Unmarshal(rec.Body.Bytes(), &switchResp)
+	if err := json.Unmarshal(rec.Body.Bytes(), &switchResp); err != nil {
+		t.Fatalf("decode switch response: %v", err)
+	}
 	subTradeId := switchResp["data"].(map[string]interface{})["trade_id"].(string)
 
 	// Fetch list-with-sub.

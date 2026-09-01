@@ -263,7 +263,7 @@ func isCallbackAck(body []byte) bool {
 }
 
 func cleanupExpiredTransactionLocks() {
-	if err := data.CleanupExpiredTransactionLocks(); err != nil {
+	if err := withSQLiteBusyRetry(data.CleanupExpiredTransactionLocks); err != nil {
 		log.Sugar.Errorf("[mq] cleanup expired transaction locks failed: %v", err)
 	}
 }

@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	aptosLedgerChunkSize   int64 = 100
-	aptosLedgerWorkerCount       = 3
-	aptosLedgerQueueLimit        = 100
+	aptosLedgerChunkSize   = int64(100)
+	aptosLedgerWorkerCount = 3
+	aptosLedgerQueueLimit  = 100
 )
 
 type aptosRuntimeCursor struct {

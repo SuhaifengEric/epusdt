@@ -2,6 +2,7 @@ package mq
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,38 @@ import (
 	"github.com/GMWalletApp/epusdt/model/mdb"
 	"github.com/GMWalletApp/epusdt/util/sign"
 )
+
+func TestWithSQLiteBusyRetryRetriesBusyFailures(t *testing.T) {
+	attempts := 0
+	err := withSQLiteBusyRetry(func() error {
+		attempts++
+		if attempts < sqliteBusyRetryAttempts {
+			return errors.New("database is locked")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("withSQLiteBusyRetry returned error: %v", err)
+	}
+	if attempts != sqliteBusyRetryAttempts {
+		t.Fatalf("attempts = %d, want %d", attempts, sqliteBusyRetryAttempts)
+	}
+}
+
+func TestWithSQLiteBusyRetryStopsOnPermanentError(t *testing.T) {
+	permanentErr := errors.New("permanent failure")
+	attempts := 0
+	err := withSQLiteBusyRetry(func() error {
+		attempts++
+		return permanentErr
+	})
+	if !errors.Is(err, permanentErr) {
+		t.Fatalf("error = %v, want %v", err, permanentErr)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+}
 
 func TestProcessExpiredOrdersExpiresWaitingOrdersAndReleasesLocks(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
@@ -265,9 +298,6 @@ func TestDispatchPendingCallbacksResumesRetryAfterRestart(t *testing.T) {
 		t.Fatalf("first callback request count = %d, want 1", got)
 	}
 
-	callbackLimiter = make(chan struct{}, 1)
-	callbackInflight = sync.Map{}
-
 	if err := dao.Mdb.Model(order).UpdateColumn("updated_at", time.Now().Add(-2*time.Second)).Error; err != nil {
 		t.Fatalf("age callback order for retry: %v", err)
 	}
@@ -466,7 +496,7 @@ func TestSendOrderCallbackGmpayUsesApiKeySecretByPid(t *testing.T) {
 
 	var received map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() { _ = r.Body.Close() }()
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &received)
 		_, _ = io.WriteString(w, "ok")
