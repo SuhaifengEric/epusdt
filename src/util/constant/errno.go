@@ -51,6 +51,7 @@ var Errno = map[int]string{
 	10045: "order api key unavailable",
 	10046: "failed to build epay return signature",
 	10047: "order immutable fields conflict",
+	10048: "api key secret unavailable",
 }
 
 var (
@@ -102,6 +103,7 @@ var (
 	OrderApiKeyUnavailableErr  = Err(10045)
 	EPayReturnSignatureErr     = Err(10046)
 	OrderImmutableConflict     = Err(10047)
+	ApiKeySecretUnavailableErr = Err(10048)
 )
 
 type RspError struct {

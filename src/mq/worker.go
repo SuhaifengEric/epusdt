@@ -233,7 +233,11 @@ func sendOrderCallback(order *mdb.Orders) error {
 			BlockTransactionId: order.BlockTransactionId,
 			Status:             mdb.StatusPaySuccess,
 		}
-		signature, err := sign.GetHMACSHA256(orderResp, apiKeyRow.SecretKey)
+		secret, err := data.HMACSecret(apiKeyRow)
+		if err != nil {
+			return err
+		}
+		signature, err := sign.GetHMACSHA256(orderResp, secret)
 		if err != nil {
 			return err
 		}

@@ -33,6 +33,34 @@ func resetInstallTestState(t *testing.T) {
 	})
 }
 
+func redactEnv(content string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "api_key_secret_active_key=") || strings.HasPrefix(trimmed, "api_key_secret_decrypt_keys=") {
+			if idx := strings.IndexByte(trimmed, '='); idx >= 0 {
+				b.WriteString(trimmed[:idx+1])
+				b.WriteString("[redacted]\n")
+				continue
+			}
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func envValue(content, key string) string {
+	prefix := key + "="
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	return ""
+}
+
 func newInstallTestAPI(envPath string) (*echo.Echo, *installHandler) {
 	h := &installHandler{envFilePath: envPath, done: make(chan struct{})}
 	e := echo.New()
@@ -143,7 +171,7 @@ func TestWriteEnvFile(t *testing.T) {
 		"install=false",
 	} {
 		if !strings.Contains(content, want) {
-			t.Errorf("env file missing %q\ncontent:\n%s", want, content)
+			t.Errorf("env file missing %q\ncontent:\n%s", want, redactEnv(content))
 		}
 	}
 }
@@ -254,13 +282,23 @@ func TestInstallAPISubmitReturnsInitialPassword(t *testing.T) {
 	}
 	content := string(data)
 	if !strings.Contains(content, "app_uri=http://10.0.0.1:8000") {
-		t.Errorf("env file missing app_uri; content:\n%s", content)
+		t.Errorf("env file missing app_uri; content:\n%s", redactEnv(content))
 	}
 	if !strings.Contains(content, "http_listen=0.0.0.0:8000") {
-		t.Errorf("env file missing http_listen; content:\n%s", content)
+		t.Errorf("env file missing http_listen; content:\n%s", redactEnv(content))
 	}
 	if !strings.Contains(content, "install=false") {
-		t.Errorf("env file missing install=false; content:\n%s", content)
+		t.Errorf("env file missing install=false; content:\n%s", redactEnv(content))
+	}
+	if rec.Body.String() != "" && strings.Contains(rec.Body.String(), envValue(content, "api_key_secret_active_key")) {
+		t.Fatal("install response leaked api key secret master key")
+	}
+	if got := envValue(content, "api_key_secret_active_key_id"); got != "master-v1" {
+		t.Fatalf("active key id = %q, want master-v1", got)
+	}
+	key := envValue(content, "api_key_secret_active_key")
+	if len(key) != 64 {
+		t.Fatalf("active key length = %d, want 64 hex chars", len(key))
 	}
 }
 
@@ -350,7 +388,7 @@ func TestInstallAPISubmitInitFailureKeepsInstallMode(t *testing.T) {
 	}
 	content := string(contentBytes)
 	if !strings.Contains(content, "install=true") {
-		t.Fatalf("expected env to keep install=true after failure; content:\n%s", content)
+		t.Fatalf("expected env to keep install=true after failure; content:\n%s", redactEnv(content))
 	}
 }
 

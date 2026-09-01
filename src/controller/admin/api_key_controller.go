@@ -218,7 +218,7 @@ func (c *BaseAdminController) RotateApiKeySecret(ctx echo.Context) error {
 		return c.FailJson(ctx, constant.ParamsMarshalErr)
 	}
 	secret := randomHex(32)
-	if err := data.UpdateApiKeyFields(id, map[string]interface{}{"secret_key": secret}); err != nil {
+	if err := data.UpdateApiKeySecret(id, secret); err != nil {
 		return c.FailJson(ctx, err)
 	}
 	return c.SucJson(ctx, map[string]string{"secret_key": secret})
@@ -300,7 +300,11 @@ func (c *BaseAdminController) GetApiKeySecret(ctx echo.Context) error {
 	if row.ID == 0 {
 		return c.FailJson(ctx, constant.ApiKeyNotFoundErr)
 	}
-	return c.SucJson(ctx, map[string]string{"secret_key": row.SecretKey})
+	secret, err := data.HMACSecret(row)
+	if err != nil {
+		return c.FailJson(ctx, constant.ApiKeySecretUnavailableErr)
+	}
+	return c.SucJson(ctx, map[string]string{"secret_key": secret})
 }
 
 func randomHex(n int) string {

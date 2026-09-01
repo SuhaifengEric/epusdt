@@ -146,7 +146,11 @@ func RegisterRoute(e *echo.Echo) {
 			return constant.SignatureErr
 		}
 
-		checkSignature, err := sign.Get(params, apiKeyRow.SecretKey)
+		secret, err := data.HMACSecret(apiKeyRow)
+		if err != nil {
+			return constant.SignatureErr
+		}
+		checkSignature, err := sign.Get(params, secret)
 		if err != nil {
 			return constant.SignatureErr
 		}

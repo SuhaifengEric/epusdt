@@ -399,54 +399,77 @@ func TestAdminApiKeys_CRUD(t *testing.T) {
 
 	// List — should contain seeded keys from setupTestEnv.
 	rec := doGetAdmin(e, "/admin/api/v1/api-keys", token)
-	t.Logf("ListApiKeys: %s", rec.Body.String())
 	assertOK(t, rec)
+	listBody := rec.Body.String()
+	if strings.Contains(listBody, "epusdt.api-key-secret") || strings.Contains(listBody, `"secret_key"`) || strings.Contains(listBody, `"ciphertext"`) {
+		t.Fatal("list api keys leaked secret or envelope")
+	}
 
 	// Create a new key.
 	rec = doPostAdmin(e, "/admin/api/v1/api-keys", map[string]interface{}{
 		"name": "test-created-key",
 	}, token)
-	t.Logf("CreateApiKey: %s", rec.Body.String())
 	resp := assertOK(t, rec)
 	dataObj, _ := resp["data"].(map[string]interface{})
 	keyID := dataObj["id"]
 	if keyID == nil {
 		t.Fatal("CreateApiKey response missing id")
 	}
+	createdSecret, _ := dataObj["secret_key"].(string)
+	if createdSecret == "" {
+		t.Fatal("create must return secret once")
+	}
 	keyIDStr := fmt.Sprintf("%.0f", keyID.(float64))
+
+	var stored string
+	if err := dao.Mdb.Model(&mdb.ApiKey{}).Select("secret_key").Where("id = ?", keyID).Scan(&stored).Error; err != nil {
+		t.Fatalf("read stored secret: %v", err)
+	}
+	if stored == createdSecret || strings.Contains(stored, createdSecret) {
+		t.Fatal("created api key stored plaintext secret")
+	}
 
 	// Update.
 	rec = doPatchAdmin(e, "/admin/api/v1/api-keys/"+keyIDStr, map[string]interface{}{
 		"name": "renamed-key",
 	}, token)
-	t.Logf("UpdateApiKey: %s", rec.Body.String())
 	assertOK(t, rec)
 
 	// Get secret.
 	rec = doGetAdmin(e, "/admin/api/v1/api-keys/"+keyIDStr+"/secret", token)
-	t.Logf("GetApiKeySecret: %s", rec.Body.String())
-	assertOK(t, rec)
+	secretResp := assertOK(t, rec)
+	secretData, _ := secretResp["data"].(map[string]interface{})
+	if got, _ := secretData["secret_key"].(string); got != createdSecret {
+		t.Fatal("view secret did not return the created merchant secret")
+	}
 
 	// Get stats.
 	rec = doGetAdmin(e, "/admin/api/v1/api-keys/"+keyIDStr+"/stats", token)
-	t.Logf("GetApiKeyStats: %s", rec.Body.String())
 	assertOK(t, rec)
 
 	// Change status.
 	rec = doPostAdmin(e, "/admin/api/v1/api-keys/"+keyIDStr+"/status", map[string]interface{}{
 		"status": 2, // disable
 	}, token)
-	t.Logf("ChangeApiKeyStatus: %s", rec.Body.String())
 	assertOK(t, rec)
 
 	// Rotate secret.
 	rec = doPostAdmin(e, "/admin/api/v1/api-keys/"+keyIDStr+"/rotate-secret", nil, token)
-	t.Logf("RotateApiKeySecret: %s", rec.Body.String())
-	assertOK(t, rec)
+	rotateResp := assertOK(t, rec)
+	rotateData, _ := rotateResp["data"].(map[string]interface{})
+	rotated, _ := rotateData["secret_key"].(string)
+	if rotated == "" || rotated == createdSecret {
+		t.Fatal("rotate secret did not return a new merchant secret")
+	}
+	if err := dao.Mdb.Model(&mdb.ApiKey{}).Select("secret_key").Where("id = ?", keyID).Scan(&stored).Error; err != nil {
+		t.Fatalf("read rotated stored secret: %v", err)
+	}
+	if stored == rotated || strings.Contains(stored, rotated) {
+		t.Fatal("rotated api key stored plaintext secret")
+	}
 
 	// Delete.
 	rec = doDeleteAdmin(e, "/admin/api/v1/api-keys/"+keyIDStr, token)
-	t.Logf("DeleteApiKey: %s", rec.Body.String())
 	assertOK(t, rec)
 }
 

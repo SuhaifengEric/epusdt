@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"log"
 	"sync"
 
 	"github.com/GMWalletApp/epusdt/config"
@@ -8,24 +9,34 @@ import (
 	"github.com/GMWalletApp/epusdt/model/data"
 	"github.com/GMWalletApp/epusdt/model/mdb"
 	"github.com/GMWalletApp/epusdt/mq"
+	"github.com/GMWalletApp/epusdt/security/apikeysecret"
 	"github.com/GMWalletApp/epusdt/task"
 	"github.com/GMWalletApp/epusdt/telegram"
 	appjwt "github.com/GMWalletApp/epusdt/util/jwt"
-	"github.com/GMWalletApp/epusdt/util/log"
+	appLog "github.com/GMWalletApp/epusdt/util/log"
 	"github.com/gookit/color"
 )
 
 var initOnce sync.Once
 
+// InitConfigAndStore loads config, logs, SQLite, and the external API key
+// secret keyring. It does not start HTTP, queue, or chain scanners.
+func InitConfigAndStore() {
+	config.Init()
+	appLog.Init()
+	dao.Init()
+	if err := apikeysecret.InstallFromViper(); err != nil {
+		log.Fatalf("api key secret keyring unavailable class=%s", apikeysecret.ClassOf(err))
+	}
+}
+
 func InitApp() {
 	initOnce.Do(func() {
-		config.Init()
-		log.Init()
-		dao.Init()
+		InitConfigAndStore()
 		logLevel := data.GetSettingString(mdb.SettingKeySystemLogLevel, mdb.SettingDefaultSystemLogLevel)
-		if err := log.SetLevel(logLevel); err != nil {
+		if err := appLog.SetLevel(logLevel); err != nil {
 			color.Red.Printf("[bootstrap] apply log level setting %q err=%s; fallback=%s\n", logLevel, err, mdb.SettingDefaultSystemLogLevel)
-			if fallbackErr := log.SetLevel(mdb.SettingDefaultSystemLogLevel); fallbackErr != nil {
+			if fallbackErr := appLog.SetLevel(mdb.SettingDefaultSystemLogLevel); fallbackErr != nil {
 				color.Red.Printf("[bootstrap] apply fallback log level err=%s\n", fallbackErr)
 			}
 		}
@@ -70,7 +81,10 @@ func InitApp() {
 		// key (PID=1000) works for all three gateway flows.
 		_, err = data.EnsureDefaultApiKey()
 		if err != nil {
-			color.Red.Printf("[bootstrap] ensure default api key err=%s\n", err)
+			log.Fatalf("ensure default api key class=%s", apikeysecret.ClassOf(err))
+		}
+		if err := data.RequireApiKeySecretsProtected(); err != nil {
+			log.Fatalf("%v", err)
 		}
 		mq.Start()
 		go telegram.BotStart()

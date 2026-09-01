@@ -8,6 +8,7 @@ import (
 	"github.com/GMWalletApp/epusdt/config"
 	"github.com/GMWalletApp/epusdt/model/dao"
 	"github.com/GMWalletApp/epusdt/model/mdb"
+	"github.com/GMWalletApp/epusdt/security/apikeysecret"
 	appLog "github.com/GMWalletApp/epusdt/util/log"
 	"github.com/libtnb/sqlite"
 	"github.com/spf13/viper"
@@ -54,6 +55,9 @@ func SetupTestDatabases(t testing.TB) func() {
 
 	dao.Mdb = mainDB
 	dao.RuntimeDB = runtimeDB
+	if err := apikeysecret.InstallTestKeyring(); err != nil {
+		t.Fatalf("install test api key secret keyring: %v", err)
+	}
 	config.SettingsGetString = func(key string) string {
 		if dao.Mdb == nil {
 			return ""
@@ -124,12 +128,12 @@ func SetupTestDatabases(t testing.TB) func() {
 	// Seed two universal api_keys rows. Both usable for EPAY/GMPAY
 	// flows; the numeric PID 1001 row lets legacy tests that submit
 	// `pid=1001` still match.
-	mainDB.Create(&mdb.ApiKey{
+	CreateApiKey(t, &mdb.ApiKey{
 		Name: "test-default",
 		Pid:  "test-token", SecretKey: "test-token",
 		Status: mdb.ApiKeyStatusEnable,
 	})
-	mainDB.Create(&mdb.ApiKey{
+	CreateApiKey(t, &mdb.ApiKey{
 		Name: "test-pid-1001",
 		Pid:  "1001", SecretKey: "test-token",
 		Status: mdb.ApiKeyStatusEnable,
@@ -153,8 +157,36 @@ func SetupTestDatabases(t testing.TB) func() {
 		config.RateCacheLoadAll = nil
 		config.RateCacheSave = nil
 		config.ResetRateCacheRuntime()
+		apikeysecret.ResetForTest()
 		viper.Reset()
 	}
+}
+
+// CreateApiKey persists an API key and encrypts its merchant secret.
+func CreateApiKey(t testing.TB, row *mdb.ApiKey) {
+	t.Helper()
+	if row == nil {
+		t.Fatal("api key row is nil")
+	}
+	plaintext := row.SecretKey
+	row.SecretKey = ""
+	if err := dao.Mdb.Create(row).Error; err != nil {
+		t.Fatalf("create api key: %v", err)
+	}
+	SealApiKey(t, row, plaintext)
+	if err := dao.Mdb.Model(row).Update("secret_key", row.SecretKey).Error; err != nil {
+		t.Fatalf("store sealed api key: %v", err)
+	}
+}
+
+// SealApiKey encrypts plaintext onto an in-memory row that already has ID and PID.
+func SealApiKey(t testing.TB, row *mdb.ApiKey, plaintext string) {
+	t.Helper()
+	sealed, err := apikeysecret.Seal(row.ID, row.Pid, plaintext)
+	if err != nil {
+		t.Fatalf("seal api key: %v", err)
+	}
+	row.SecretKey = sealed
 }
 
 func testRateCacheSnapshot(row mdb.RateCache) config.RateCacheSnapshot {

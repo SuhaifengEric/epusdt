@@ -296,7 +296,11 @@ func QueryMerchantOrder(req *request.MerchantOrderQueryRequest, apiKey *mdb.ApiK
 		Status:             order.Status,
 		ExpirationTime:     order.CreatedAt.AddMinutes(config.GetOrderExpirationTime()).Timestamp(),
 	}
-	resp.Signature, err = sign.GetHMACSHA256(*resp, apiKey.SecretKey)
+	secret, err := data.HMACSecret(apiKey)
+	if err != nil {
+		return nil, constant.SignatureErr
+	}
+	resp.Signature, err = sign.GetHMACSHA256(*resp, secret)
 	if err != nil {
 		return nil, err
 	}

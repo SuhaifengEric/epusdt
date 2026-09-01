@@ -3,11 +3,13 @@ package data
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/GMWalletApp/epusdt/model/dao"
 	"github.com/GMWalletApp/epusdt/model/mdb"
+	"github.com/GMWalletApp/epusdt/security/apikeysecret"
 	"github.com/dromara/carbon/v2"
 	"gorm.io/gorm"
 )
@@ -39,15 +41,24 @@ func ListApiKeys() ([]mdb.ApiKey, error) {
 	return rows, err
 }
 
-// CreateApiKey persists a new row.
+// CreateApiKey persists a new row. The merchant secret is encrypted before
+// commit; plaintext is never left in SQLite.
 func CreateApiKey(row *mdb.ApiKey) error {
-	return dao.Mdb.Create(row).Error
+	if row == nil {
+		return apikeysecret.ErrMissingField
+	}
+	return persistApiKeyWithPlaintext(row, row.SecretKey)
 }
 
 // UpdateApiKeyFields updates a whitelist of mutable fields on a row.
+// secret_key must be changed through UpdateApiKeySecret so plaintext cannot
+// be written by accident.
 func UpdateApiKeyFields(id uint64, fields map[string]interface{}) error {
 	if len(fields) == 0 {
 		return nil
+	}
+	if _, ok := fields["secret_key"]; ok {
+		return fmt.Errorf("secret_key must be updated via UpdateApiKeySecret")
 	}
 	return dao.Mdb.Model(&mdb.ApiKey{}).Where("id = ?", id).Updates(fields).Error
 }
@@ -120,7 +131,7 @@ func EnsureDefaultApiKey() (*SeededApiKey, error) {
 		SecretKey: secret,
 		Status:    mdb.ApiKeyStatusEnable,
 	}
-	if err := dao.Mdb.Create(row).Error; err != nil {
+	if err := CreateApiKey(row); err != nil {
 		return nil, err
 	}
 	return &SeededApiKey{

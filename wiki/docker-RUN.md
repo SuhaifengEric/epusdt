@@ -75,6 +75,12 @@ order_expiration_time=10
 order_notice_max_retry=0
 api_rate_url=https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/
 tron_grid_api_key=
+
+# API Key Secret master keyring. Fill with a 64-hex 32-byte key before starting
+# a migrated database. Leave empty only for first-run install wizard.
+api_key_secret_active_key_id=
+api_key_secret_active_key=
+api_key_secret_decrypt_keys=
 EOF
 ```
 3. docker compose 创建
