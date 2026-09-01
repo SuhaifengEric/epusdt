@@ -106,18 +106,18 @@ Conclusion: no clear "fix by duplication" smell was found.
 
 No confirmed blocking business bug is currently visible in the reviewed code path.
 
-Important risk that still needs attention:
+The runtime SQLite database is deliberately single-connection for the supported
+single-instance deployment. This prevents Epusdt's concurrent scheduler tasks
+from opening competing writer connections against the same runtime file.
 
-- SQLite main DB can still hit `SQLITE_BUSY` under concurrent polling and writes.
-
-This risk is now being mitigated by:
+The remaining safeguards are:
 
 - `src/model/dao/sqlite_config.go`
 - `src/model/dao/mdb_sqlite.go`
 - `src/model/dao/runtime_sqlite.go`
 - lightweight busy retry in `src/mq/worker.go`
 
-Conclusion: no confirmed blocking functional bug, but SQLite concurrency remains a real operational boundary that should still be watched in runtime.
+Conclusion: no confirmed blocking functional bug for the supported single-instance deployment. A second Epusdt process must not share the same runtime SQLite files.
 
 ## Robustness Assessment
 
@@ -135,7 +135,7 @@ Remaining limits:
 
 - robust for single-instance deployment
 - not a final design for multi-instance deployment
-- SQLite contention should still be watched in real runtime
+- the runtime SQLite files are not a multi-instance coordination store
 
 Conclusion: robust enough for single-instance use, not a direct multi-instance design.
 
@@ -154,7 +154,7 @@ Strengths:
 Tradeoffs:
 
 - callback semantics are no longer the same as the old immediate-asynq enqueue path
-- current branch still has local uncommitted fixes that must be organized into a clean commit set
+- the runtime fix must remain in the intentional commit set
 
 Conclusion: elegant for the chosen single-instance direction, but must be explained clearly when merging.
 
@@ -190,8 +190,8 @@ Overall self score: 8.9/10
 
 Main deductions:
 
-- current uncommitted fixes still need to be organized into a clean commit
-- SQLite single-file concurrency boundary still exists
+- the runtime fix must be included in a clean, intentional commit
+- SQLite single-file storage still requires single-instance deployment
 - callback semantics differ from `dev-payment` and require clear communication
 
 ## Final Conclusion

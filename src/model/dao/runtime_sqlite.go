@@ -12,6 +12,12 @@ import (
 
 var RuntimeDB *gorm.DB
 
+// runtimeSQLiteMaxOpenConns is intentionally one for the single-instance
+// runtime database. SQLite permits concurrent readers, but all writes still
+// serialize at the file level. Sharing one connection lets database/sql
+// serialize the short lock/cursor writes before SQLite has to report BUSY.
+const runtimeSQLiteMaxOpenConns = 1
+
 func RuntimeInit() error {
 	var err error
 	runtimePath := config.GetRuntimeSqlitePath()
@@ -27,14 +33,7 @@ func RuntimeInit() error {
 		return err
 	}
 
-	concurrency := config.GetQueueConcurrency()
-	if concurrency < 2 {
-		concurrency = 2
-	}
-	if concurrency > 16 {
-		concurrency = 16
-	}
-	if _, err = configureSQLite(RuntimeDB, concurrency); err != nil {
+	if _, err = configureSQLite(RuntimeDB, runtimeSQLiteMaxOpenConns); err != nil {
 		color.Red.Printf("[runtime_db] sqlite connDB err:%s", err.Error())
 		return err
 	}
