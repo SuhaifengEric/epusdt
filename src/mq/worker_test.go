@@ -454,9 +454,7 @@ func TestResolveOrderApiKeyReturnsEnabledRow(t *testing.T) {
 		SecretKey: "target-secret",
 		Status:    mdb.ApiKeyStatusEnable,
 	}
-	if err := dao.Mdb.Create(row).Error; err != nil {
-		t.Fatalf("create api key: %v", err)
-	}
+	testutil.CreateApiKey(t, row)
 	order := &mdb.Orders{
 		TradeId:  "happy-path",
 		ApiKeyID: row.ID,
@@ -474,25 +472,23 @@ func TestSendOrderCallbackGmpayUsesApiKeySecretByPid(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
 
+	const gmpaySecret = "gmpay-secret-9001"
+	const wrongGmpaySecret = "wrong-secret-9002"
 	key := &mdb.ApiKey{
 		Name:      "gmpay-key",
 		Pid:       "9001",
-		SecretKey: "gmpay-secret-9001",
+		SecretKey: gmpaySecret,
 		Status:    mdb.ApiKeyStatusEnable,
 	}
-	if err := dao.Mdb.Create(key).Error; err != nil {
-		t.Fatalf("create gmpay api key: %v", err)
-	}
+	testutil.CreateApiKey(t, key)
 
 	warningKey := &mdb.ApiKey{
 		Name:      "wrong-key",
 		Pid:       "9002",
-		SecretKey: "wrong-secret-9002",
+		SecretKey: wrongGmpaySecret,
 		Status:    mdb.ApiKeyStatusEnable,
 	}
-	if err := dao.Mdb.Create(warningKey).Error; err != nil {
-		t.Fatalf("create wrong api key: %v", err)
-	}
+	testutil.CreateApiKey(t, warningKey)
 
 	var received map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -545,7 +541,7 @@ func TestSendOrderCallbackGmpayUsesApiKeySecretByPid(t *testing.T) {
 	}
 	delete(received, "signature")
 
-	calcSig, err := sign.GetHMACSHA256(received, key.SecretKey)
+	calcSig, err := sign.GetHMACSHA256(received, gmpaySecret)
 	if err != nil {
 		t.Fatalf("calc signature with target secret: %v", err)
 	}
@@ -553,7 +549,7 @@ func TestSendOrderCallbackGmpayUsesApiKeySecretByPid(t *testing.T) {
 		t.Fatalf("signature mismatch: got %q want %q", recvSig, calcSig)
 	}
 
-	wrongSig, err := sign.GetHMACSHA256(received, warningKey.SecretKey)
+	wrongSig, err := sign.GetHMACSHA256(received, wrongGmpaySecret)
 	if err != nil {
 		t.Fatalf("calc signature with wrong secret: %v", err)
 	}
@@ -566,25 +562,23 @@ func TestSendOrderCallbackEpayUsesApiKeySecretByPid(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
 
+	const epaySecret = "epay-secret-9101"
+	const wrongEpaySecret = "wrong-epay-secret-9102"
 	key := &mdb.ApiKey{
 		Name:      "epay-key",
 		Pid:       "9101",
-		SecretKey: "epay-secret-9101",
+		SecretKey: epaySecret,
 		Status:    mdb.ApiKeyStatusEnable,
 	}
-	if err := dao.Mdb.Create(key).Error; err != nil {
-		t.Fatalf("create epay api key: %v", err)
-	}
+	testutil.CreateApiKey(t, key)
 
 	warningKey := &mdb.ApiKey{
 		Name:      "wrong-epay-key",
 		Pid:       "9102",
-		SecretKey: "wrong-epay-secret-9102",
+		SecretKey: wrongEpaySecret,
 		Status:    mdb.ApiKeyStatusEnable,
 	}
-	if err := dao.Mdb.Create(warningKey).Error; err != nil {
-		t.Fatalf("create wrong epay api key: %v", err)
-	}
+	testutil.CreateApiKey(t, warningKey)
 
 	formPayload := map[string]string{}
 	callbackMethod := ""
@@ -658,7 +652,7 @@ func TestSendOrderCallbackEpayUsesApiKeySecretByPid(t *testing.T) {
 		"trade_status": formPayload["trade_status"],
 	}
 
-	calcSig, err := sign.Get(signParams, key.SecretKey)
+	calcSig, err := sign.Get(signParams, epaySecret)
 	if err != nil {
 		t.Fatalf("calc epay signature with target secret: %v", err)
 	}
@@ -666,7 +660,7 @@ func TestSendOrderCallbackEpayUsesApiKeySecretByPid(t *testing.T) {
 		t.Fatalf("epay signature mismatch: got %q want %q", recvSig, calcSig)
 	}
 
-	wrongSig, err := sign.Get(signParams, warningKey.SecretKey)
+	wrongSig, err := sign.Get(signParams, wrongEpaySecret)
 	if err != nil {
 		t.Fatalf("calc epay signature with wrong secret: %v", err)
 	}
@@ -679,15 +673,14 @@ func TestSendOrderCallbackEpayPreservesStoredAlipayType(t *testing.T) {
 	cleanup := testutil.SetupTestDatabases(t)
 	defer cleanup()
 
+	const storedEpaySecret = "epay-secret-9201"
 	key := &mdb.ApiKey{
 		Name:      "epay-key-stored-type",
 		Pid:       "9201",
-		SecretKey: "epay-secret-9201",
+		SecretKey: storedEpaySecret,
 		Status:    mdb.ApiKeyStatusEnable,
 	}
-	if err := dao.Mdb.Create(key).Error; err != nil {
-		t.Fatalf("create epay api key: %v", err)
-	}
+	testutil.CreateApiKey(t, key)
 
 	formPayload := map[string]string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -737,7 +730,7 @@ func TestSendOrderCallbackEpayPreservesStoredAlipayType(t *testing.T) {
 		"money":        formPayload["money"],
 		"trade_status": formPayload["trade_status"],
 	}
-	calcSig, err := sign.Get(signParams, key.SecretKey)
+	calcSig, err := sign.Get(signParams, storedEpaySecret)
 	if err != nil {
 		t.Fatalf("calc epay signature: %v", err)
 	}

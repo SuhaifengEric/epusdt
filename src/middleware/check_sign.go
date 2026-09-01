@@ -75,7 +75,11 @@ func CheckApiSign() echo.MiddlewareFunc {
 				return constant.SignatureErr
 			}
 
-			checkSignature, err := sign.GetHMACSHA256(m, row.SecretKey)
+			secret, err := data.HMACSecret(row)
+			if err != nil {
+				return constant.SignatureErr
+			}
+			checkSignature, err := sign.GetHMACSHA256(m, secret)
 			if err != nil {
 				return constant.SignatureErr
 			}

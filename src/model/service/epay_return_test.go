@@ -6,8 +6,8 @@ import (
 
 	"github.com/GMWalletApp/epusdt/config"
 	"github.com/GMWalletApp/epusdt/internal/testutil"
-	"github.com/GMWalletApp/epusdt/model/dao"
 	"github.com/GMWalletApp/epusdt/model/mdb"
+	"github.com/GMWalletApp/epusdt/security/apikeysecret"
 	"github.com/GMWalletApp/epusdt/util/constant"
 	"github.com/GMWalletApp/epusdt/util/sign"
 )
@@ -41,16 +41,20 @@ func TestBuildPublicRedirectURLRewritesOnlyEpayOrders(t *testing.T) {
 }
 
 func TestBuildEPayResultParamsUsesOriginalType(t *testing.T) {
+	t.Cleanup(apikeysecret.ResetForTest)
+	if err := apikeysecret.InstallTestKeyring(); err != nil {
+		t.Fatalf("install test keyring: %v", err)
+	}
+	apiKey := &mdb.ApiKey{Pid: "1001"}
+	apiKey.ID = 1
+	testutil.SealApiKey(t, apiKey, "epay-secret")
 	params, err := BuildEPayResultParams(&mdb.Orders{
 		TradeId:  "trade_epay_params",
 		OrderId:  "order_epay_params",
 		Name:     "VIP",
 		Amount:   1,
 		EpayType: "usdt.tron",
-	}, &mdb.ApiKey{
-		Pid:       "1001",
-		SecretKey: "epay-secret",
-	})
+	}, apiKey)
 	if err != nil {
 		t.Fatalf("BuildEPayResultParams(): %v", err)
 	}
@@ -90,15 +94,19 @@ func TestBuildEPayResultParamsUsesOriginalType(t *testing.T) {
 }
 
 func TestBuildEPayResultParamsFallsBackToAlipayWhenTypeMissing(t *testing.T) {
+	t.Cleanup(apikeysecret.ResetForTest)
+	if err := apikeysecret.InstallTestKeyring(); err != nil {
+		t.Fatalf("install test keyring: %v", err)
+	}
+	apiKey := &mdb.ApiKey{Pid: "1001"}
+	apiKey.ID = 1
+	testutil.SealApiKey(t, apiKey, "epay-secret")
 	params, err := BuildEPayResultParams(&mdb.Orders{
 		TradeId: "trade_epay_fallback",
 		OrderId: "order_epay_fallback",
 		Name:    "VIP",
 		Amount:  1,
-	}, &mdb.ApiKey{
-		Pid:       "1001",
-		SecretKey: "epay-secret",
-	})
+	}, apiKey)
 	if err != nil {
 		t.Fatalf("BuildEPayResultParams(): %v", err)
 	}
@@ -136,9 +144,7 @@ func TestResolveOrderApiKeyRejectsUnavailableRows(t *testing.T) {
 		SecretKey: "disabled-secret",
 		Status:    mdb.ApiKeyStatusDisable,
 	}
-	if err := dao.Mdb.Create(row).Error; err != nil {
-		t.Fatalf("create disabled api key: %v", err)
-	}
+	testutil.CreateApiKey(t, row)
 	if _, err := ResolveOrderApiKey(&mdb.Orders{TradeId: "disabled_api_key", ApiKeyID: row.ID}); err != constant.OrderApiKeyUnavailableErr {
 		t.Fatalf("disabled api key error = %v, want %v", err, constant.OrderApiKeyUnavailableErr)
 	}

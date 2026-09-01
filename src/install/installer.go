@@ -33,6 +33,7 @@ import (
 	"github.com/GMWalletApp/epusdt/config"
 	"github.com/GMWalletApp/epusdt/model/dao"
 	"github.com/GMWalletApp/epusdt/model/data"
+	"github.com/GMWalletApp/epusdt/security/apikeysecret"
 	luluHttp "github.com/GMWalletApp/epusdt/util/http"
 	appLog "github.com/GMWalletApp/epusdt/util/log"
 	"github.com/gookit/color"
@@ -281,9 +282,38 @@ var formControlledKeys = map[string]bool{
 	"install":                true,
 }
 
+func resolveApiKeySecretKeyring(existing map[string]string) (id, key, decrypt string, err error) {
+	id = strings.TrimSpace(existing[apikeysecret.ViperActiveKeyID])
+	key = strings.TrimSpace(existing[apikeysecret.ViperActiveKey])
+	decrypt = strings.TrimSpace(existing[apikeysecret.ViperDecryptKeys])
+	switch {
+	case id != "" && key != "":
+		if _, err = apikeysecret.NewKeyring(id, key, nil); err != nil {
+			return "", "", "", fmt.Errorf("existing api key secret keyring is invalid")
+		}
+		if decrypt != "" {
+			if _, err = apikeysecret.ParseDecryptKeys(decrypt); err != nil {
+				return "", "", "", fmt.Errorf("existing api key secret decrypt keys are invalid")
+			}
+		}
+		return id, key, decrypt, nil
+	case id == "" && key == "":
+		key, err = apikeysecret.GenerateMasterKey()
+		if err != nil {
+			return "", "", "", fmt.Errorf("generate api key secret master key: %w", err)
+		}
+		return apikeysecret.DefaultActiveKeyID, key, decrypt, nil
+	default:
+		return "", "", "", fmt.Errorf("api key secret keyring is incomplete")
+	}
+}
+
 type envTemplateData struct {
 	*InstallRequest
-	InstallValue string
+	InstallValue            string
+	ApiKeySecretActiveKeyID string
+	ApiKeySecretActiveKey   string
+	ApiKeySecretDecryptKeys string
 }
 
 // writeEnvFile renders and atomically writes a minimal .env file.
@@ -315,11 +345,19 @@ func writeEnvFile(path string, r *InstallRequest, installEnabled bool) error {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 
+	keyID, keyHex, decryptKeys, err := resolveApiKeySecretKeyring(existingValues)
+	if err != nil {
+		return err
+	}
+
 	// Render the template into a buffer first.
 	var buf bytes.Buffer
 	renderData := envTemplateData{
-		InstallRequest: r,
-		InstallValue:   "false",
+		InstallRequest:          r,
+		InstallValue:            "false",
+		ApiKeySecretActiveKeyID: keyID,
+		ApiKeySecretActiveKey:   keyHex,
+		ApiKeySecretDecryptKeys: decryptKeys,
 	}
 	if installEnabled {
 		renderData.InstallValue = "true"
@@ -470,6 +508,12 @@ order_expiration_time={{.OrderExpirationTime}}
 order_notice_max_retry={{.OrderNoticeMaxRetry}}
 
 api_rate_url=
+
+# API Key Secret master keyring. 32-byte keys as 64 hex characters.
+# Keep this file outside the image and back it up separately from SQLite.
+api_key_secret_active_key_id={{.ApiKeySecretActiveKeyID}}
+api_key_secret_active_key={{.ApiKeySecretActiveKey}}
+api_key_secret_decrypt_keys={{.ApiKeySecretDecryptKeys}}
 
 # Set to true to re-run the install wizard on next startup.
 install={{.InstallValue}}

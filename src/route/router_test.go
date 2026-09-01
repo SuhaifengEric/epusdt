@@ -19,6 +19,7 @@ import (
 	"github.com/GMWalletApp/epusdt/model/data"
 	"github.com/GMWalletApp/epusdt/model/mdb"
 	"github.com/GMWalletApp/epusdt/model/service"
+	"github.com/GMWalletApp/epusdt/security/apikeysecret"
 	"github.com/GMWalletApp/epusdt/util/constant"
 	"github.com/GMWalletApp/epusdt/util/http_client"
 	"github.com/GMWalletApp/epusdt/util/log"
@@ -56,6 +57,10 @@ func setupTestEnv(t *testing.T) *echo.Echo {
 	if err := log.SetLevel(config.LogLevel); err != nil {
 		t.Fatalf("set test log level: %v", err)
 	}
+	if err := apikeysecret.InstallTestKeyring(); err != nil {
+		t.Fatalf("install test api key secret keyring: %v", err)
+	}
+	t.Cleanup(apikeysecret.ResetForTest)
 
 	// init config paths
 	if err := os.Setenv("EPUSDT_CONFIG", tmpDir); err != nil {
@@ -157,19 +162,23 @@ func setupTestEnv(t *testing.T) *echo.Echo {
 	// Seed one universal api_keys row. The test's testAPIToken doubles
 	// as both pid and secret_key so signing helper calls
 	// stay valid.
-	dao.Mdb.Create(&mdb.ApiKey{
+	if err := data.CreateApiKey(&mdb.ApiKey{
 		Name:      "test-universal",
 		Pid:       testAPIToken,
 		SecretKey: testAPIToken,
 		Status:    mdb.ApiKeyStatusEnable,
-	})
+	}); err != nil {
+		t.Fatalf("seed universal api key: %v", err)
+	}
 	// Additional numeric-PID row for EPAY tests (EPAY pid must be numeric).
-	dao.Mdb.Create(&mdb.ApiKey{
+	if err := data.CreateApiKey(&mdb.ApiKey{
 		Name:      "test-epay-pid-1",
 		Pid:       "1",
 		SecretKey: testAPIToken,
 		Status:    mdb.ApiKeyStatusEnable,
-	})
+	}); err != nil {
+		t.Fatalf("seed epay api key: %v", err)
+	}
 
 	e := echo.New()
 	RegisterRoute(e)
@@ -488,12 +497,13 @@ func TestMerchantOrderQueryIsCompleteSignedAndScoped(t *testing.T) {
 		t.Fatalf("identifier mismatch status_code = %d, want 10008", got)
 	}
 
-	otherKey := &mdb.ApiKey{Name: "other-merchant", Pid: "other-pid", SecretKey: "other-secret", Status: mdb.ApiKeyStatusEnable}
-	if err = dao.Mdb.Create(otherKey).Error; err != nil {
+	const otherSecret = "other-secret"
+	otherKey := &mdb.ApiKey{Name: "other-merchant", Pid: "other-pid", SecretKey: otherSecret, Status: mdb.ApiKeyStatusEnable}
+	if err = data.CreateApiKey(otherKey); err != nil {
 		t.Fatalf("create other api key: %v", err)
 	}
 	crossMerchant := map[string]interface{}{"pid": otherKey.Pid, "order_id": "test-merchant-query-001"}
-	crossSignature, err := sign.GetHMACSHA256(crossMerchant, otherKey.SecretKey)
+	crossSignature, err := sign.GetHMACSHA256(crossMerchant, otherSecret)
 	if err != nil {
 		t.Fatalf("sign cross-merchant query: %v", err)
 	}

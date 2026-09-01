@@ -14,7 +14,7 @@ const (
 type ApiKey struct {
 	Name        string `gorm:"column:name;size:128" json:"name" example:"My API Key"`
 	Pid         string `gorm:"column:pid;size:128;uniqueIndex:api_keys_pid_uindex" json:"pid" example:"1000"`
-	SecretKey   string `gorm:"column:secret_key;size:255" json:"-"`
+	SecretKey   string `gorm:"column:secret_key;type:text" json:"-"`
 	IpWhitelist string `gorm:"column:ip_whitelist;type:text" json:"ip_whitelist" example:"192.168.1.0/24,10.0.0.1"`
 	NotifyUrl   string `gorm:"column:notify_url;size:512" json:"notify_url" example:"https://example.com/notify"`
 	// 状态 1=启用 2=禁用

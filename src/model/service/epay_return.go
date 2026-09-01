@@ -101,7 +101,11 @@ func BuildEPayResultParams(order *mdb.Orders, apiKeyRow *mdb.ApiKey) (map[string
 		TradeStatus: "TRADE_SUCCESS",
 	}
 
-	signstr, err := sign.Get(notifyData, apiKeyRow.SecretKey)
+	secret, err := data.HMACSecret(apiKeyRow)
+	if err != nil {
+		return nil, constant.EPayReturnSignatureErr
+	}
+	signstr, err := sign.Get(notifyData, secret)
 	if err != nil {
 		return nil, constant.EPayReturnSignatureErr
 	}
